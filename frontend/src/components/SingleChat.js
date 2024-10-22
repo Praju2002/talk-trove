@@ -29,6 +29,7 @@ const SingleChat = ({ fetchAgain, setFetchAgain }) => {
   const [typing, setTyping] = useState(false);
   const [istyping, setIsTyping] = useState(false);
   const toast = useToast();
+  const [disappearAfter, setDisappearAfter] = useState(0);
 
   const defaultOptions = {
     loop: true,
@@ -42,71 +43,96 @@ const SingleChat = ({ fetchAgain, setFetchAgain }) => {
   const { selectedChat, setSelectedChat, user, notification, setNotification } =
     ChatState();
 
-  const fetchMessages = async () => {
-    if (!selectedChat) return;
-
-    try {
-      const config = {
-        headers: {
-          Authorization: `Bearer ${user.token}`,
-        },
-      };
-
-      setLoading(true);
-
-      const { data } = await axiosReq.get(
-        `/api/message/${selectedChat._id}`,
-        config
-      );
-      setMessages(data);
-      setLoading(false);
-
-      socket.emit("join chat", selectedChat._id);
-    } catch (error) {
-      toast({
-        title: "Error Occured!",
-        description: "Failed to Load the Messages",
-        status: "error",
-        duration: 5000,
-        isClosable: true,
-        position: "bottom",
-      });
-    }
-  };
-
-  const sendMessage = async () => {
-    if (newMessage) {
-      socket.emit("stop typing", selectedChat._id);
+    const fetchMessages = async () => {
+      if (!selectedChat) return;
+    
       try {
         const config = {
           headers: {
-            "Content-type": "application/json",
             Authorization: `Bearer ${user.token}`,
           },
         };
-        setNewMessage("");
-        const { data } = await axiosReq.post(
-          "/api/message",
-          {
-            content: newMessage,
-            chatId: selectedChat,
-          },
-          config
+    
+        setLoading(true);
+    
+        const { data } = await axiosReq.get(
+          `/api/message/${selectedChat._id}`,
+          config // Corrected: Removed disappearAfter from here
         );
-        socket.emit("new message", data);
-        setMessages([...messages, data]);
+        
+        setMessages(data);
+        setLoading(false);
+    
+        socket.emit("join chat", selectedChat._id);
+    
+        // Set timeouts for disappearing messages
+        data.forEach(msg => {
+          if (msg.disappearAfter > 0) {
+            setTimeout(() => {
+              setMessages(prevMessages => 
+                prevMessages.filter(message => message._id !== msg._id)
+              );
+            }, msg.disappearAfter * 1000); // Convert to milliseconds
+          }
+        });
+    
       } catch (error) {
         toast({
-          title: "Error Occured!",
-          description: "Failed to send the Message",
+          title: "Error Occurred!",
+          description: "Failed to Load the Messages",
           status: "error",
           duration: 5000,
           isClosable: true,
           position: "bottom",
         });
       }
-    }
-  };
+    };
+    
+
+    const sendMessage = async () => {
+      if (newMessage) {
+        socket.emit("stop typing", selectedChat._id);
+        try {
+          const config = {
+            headers: {
+              "Content-type": "application/json",
+              Authorization: `Bearer ${user.token}`,
+            },
+          };
+    
+          const { data } = await axiosReq.post(
+            "/api/message",
+            {
+              content: newMessage,
+              chatId: selectedChat._id,
+              disappearAfter, // Added disappearAfter here
+            },
+            config
+          );
+    
+          socket.emit("new message", data);
+          setMessages(prevMessages => [...prevMessages, data]);
+          setNewMessage(""); // Clear input after sending
+          if (disappearAfter > 0) {
+            setTimeout(() => {
+              setMessages((prevMessages) => 
+                prevMessages.filter((msg) => msg._id !== data._id)
+              );
+            }, disappearAfter * 1000); // Convert to milliseconds
+          }
+        } catch (error) {
+          toast({
+            title: "Error Occurred!",
+            description: "Failed to send the Message",
+            status: "error",
+            duration: 5000,
+            isClosable: true,
+            position: "bottom",
+          });
+        }
+      }
+    };
+    
 
   const handleEmojiClick = (emojiObject) => {
     setNewMessage((prevMessage) => prevMessage + emojiObject.emoji);
@@ -276,6 +302,15 @@ const SingleChat = ({ fetchAgain, setFetchAgain }) => {
                 value={newMessage}
                 onChange={typingHandler}
               />
+              <select
+        value={disappearAfter}
+        onChange={(e) => setDisappearAfter(e.target.value)}
+      >
+        <option value="0">Do not disappear</option>
+        <option value="60">1 minute</option>
+        <option value="300">5 minutes</option>
+        <option value="3600">1 hour</option>
+      </select>
               <Button onClick={sendMessage} colorScheme="teal" ml={2}>
                 Send
               </Button>
